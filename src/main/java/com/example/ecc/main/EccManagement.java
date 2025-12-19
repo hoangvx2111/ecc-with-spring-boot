@@ -1,113 +1,104 @@
 package com.example.ecc.main;
 
-import org.apache.tomcat.util.codec.binary.Base64;
-
-import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
-import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.KeyAgreement;
-import javax.crypto.NoSuchPaddingException;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.security.InvalidAlgorithmParameterException;
-import java.security.InvalidKeyException;
+import java.security.GeneralSecurityException;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
-import java.security.NoSuchAlgorithmException;
-import java.security.NoSuchProviderException;
 import java.security.PrivateKey;
 import java.security.PublicKey;
+import java.security.SecureRandom;
+import java.security.MessageDigest;
 import java.security.spec.ECGenParameterSpec;
+import java.util.Base64;
 
 public class EccManagement {
-  public static void main(String[] args) {
-    String plainText = "Hello World!";
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+    private static final int GCM_IV_LENGTH_BYTES = 12;     // recommended for GCM
+    private static final int GCM_TAG_LENGTH_BITS = 128;    // 16 bytes tag
 
-    System.out.println("Plaintext: " + plainText);
+    public static void main(String[] args) throws GeneralSecurityException {
+        String plainText = "Hello World!";
+        System.out.println("Plaintext: " + plainText);
 
-    // Create two key pairs
-    KeyPair keyPairA = generateKeyPair();
-    KeyPair keyPairB = generateKeyPair();
+        KeyPair keyPairA = generateKeyPair();
+        KeyPair keyPairB = generateKeyPair();
 
-    // Create ECDH share secret by AES
-    SecretKey secretKeyA = generateSharedSecret(keyPairA.getPrivate(), keyPairB.getPublic());
-    SecretKey secretKeyB = generateSharedSecret(keyPairB.getPrivate(), keyPairA.getPublic());
+        SecretKey secretKeyA = deriveAesKeyFromEcdh(keyPairA.getPrivate(), keyPairB.getPublic());
+        SecretKey secretKeyB = deriveAesKeyFromEcdh(keyPairB.getPrivate(), keyPairA.getPublic());
 
-    System.out.println("Secret Key A: " + Base64.encodeBase64String(secretKeyA.getEncoded()).toUpperCase());
-    System.out.println("Secret Key B: " + Base64.encodeBase64String(secretKeyB.getEncoded()).toUpperCase());
+        System.out.println("Secret Key A: " + Base64.getEncoder().encodeToString(secretKeyA.getEncoded()));
+        System.out.println("Secret Key B: " + Base64.getEncoder().encodeToString(secretKeyB.getEncoded()));
 
-    // Encrypt by secretKeyA
-    String encryptText = encryptString(secretKeyA, plainText);
-    System.out.println("Encrypted text: " + encryptText);
+        String encrypted = encryptString(secretKeyA, plainText);
+        System.out.println("Encrypted text: " + encrypted);
 
-    // Decrypt by secretKeyB
-    String decryptedText = decryptString(secretKeyB, encryptText);
-    System.out.println("Decrypted text: " + decryptedText);
-
-  }
-
-  public static KeyPair generateKeyPair() {
-    try {
-      KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("EC", "SunEC");
-      ECGenParameterSpec parameterSpec = new ECGenParameterSpec("secp192k1");
-
-      keyPairGenerator.initialize(parameterSpec);
-      KeyPair keyPair = keyPairGenerator.genKeyPair();
-
-      return keyPair;
-    } catch (NoSuchAlgorithmException | InvalidAlgorithmParameterException |
-            NoSuchProviderException e) {
-      e.printStackTrace();
-      return null;
+        String decrypted = decryptString(secretKeyB, encrypted);
+        System.out.println("Decrypted text: " + decrypted);
     }
-  }
 
-  public static SecretKey generateSharedSecret(PrivateKey privateKey,
-                                               PublicKey publicKey) {
-    try {
-      KeyAgreement keyAgreement = KeyAgreement.getInstance("ECDH");
-      keyAgreement.init(privateKey);
-      keyAgreement.doPhase(publicKey, true);
-
-      SecretKey keySpec = new SecretKeySpec(keyAgreement.generateSecret(), "AES");
-      return keySpec;
-    } catch (InvalidKeyException | NoSuchAlgorithmException e) {
-      e.printStackTrace();
-      return null;
+    public static KeyPair generateKeyPair() throws GeneralSecurityException {
+        KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("EC");
+        // Bạn có thể đổi sang secp256r1 (phổ biến hơn) nếu muốn
+        ECGenParameterSpec parameterSpec = new ECGenParameterSpec("secp192k1");
+        keyPairGenerator.initialize(parameterSpec, SECURE_RANDOM);
+        return keyPairGenerator.genKeyPair();
     }
-  }
 
-  public static String encryptString(SecretKey key, String plainText) {
-    try {
-      Cipher cipher = Cipher.getInstance("AES/GCM/PKCS5Padding");
-      GCMParameterSpec gcmParameterSpec = new GCMParameterSpec(128, new byte[12]);
+    /** ECDH -> shared secret -> SHA-256 -> AES-256 key */
+    public static SecretKey deriveAesKeyFromEcdh(PrivateKey privateKey, PublicKey publicKey)
+            throws GeneralSecurityException {
+        KeyAgreement keyAgreement = KeyAgreement.getInstance("ECDH");
+        keyAgreement.init(privateKey);
+        keyAgreement.doPhase(publicKey, true);
 
-      cipher.init(Cipher.ENCRYPT_MODE, key, gcmParameterSpec);
-      byte[] encryptByte = cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
-      return Base64.encodeBase64String(encryptByte);
-    } catch (NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException |
-            InvalidAlgorithmParameterException | IllegalBlockSizeException | BadPaddingException e) {
-      e.printStackTrace();
-      return null;
+        byte[] sharedSecret = keyAgreement.generateSecret();
+        byte[] keyMaterial = MessageDigest.getInstance("SHA-256").digest(sharedSecret); // 32 bytes
+        return new SecretKeySpec(keyMaterial, "AES");
     }
-  }
 
-  public static String decryptString(SecretKey key, String encryptText) {
-    try {
-      byte[] decode = Base64.decodeBase64(encryptText);
-      Cipher cipher = Cipher.getInstance("AES/GCM/PKCS5Padding");
-      GCMParameterSpec gcmParameterSpec = new GCMParameterSpec(128, new byte[12]);
+    /**
+     * Output format: Base64( IV(12) || CIPHERTEXT+TAG )
+     */
+    public static String encryptString(SecretKey key, String plainText) throws GeneralSecurityException {
+        byte[] iv = new byte[GCM_IV_LENGTH_BYTES];
+        SECURE_RANDOM.nextBytes(iv);
 
-      cipher.init(Cipher.DECRYPT_MODE, key, gcmParameterSpec);
-      byte[] decryptByte = cipher.doFinal(decode);
-      String decryptText = new String(decryptByte);
-      return decryptText;
-    } catch (NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException |
-            InvalidAlgorithmParameterException | IllegalBlockSizeException | BadPaddingException e) {
-      e.printStackTrace();
-      return null;
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv));
+
+        byte[] ciphertextWithTag = cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
+
+        byte[] out = ByteBuffer.allocate(iv.length + ciphertextWithTag.length)
+                .put(iv)
+                .put(ciphertextWithTag)
+                .array();
+
+        return Base64.getEncoder().encodeToString(out);
     }
-  }
+
+    public static String decryptString(SecretKey key, String encrypted) throws GeneralSecurityException {
+        byte[] in = Base64.getDecoder().decode(encrypted);
+
+        if (in.length < GCM_IV_LENGTH_BYTES + 1) {
+            throw new GeneralSecurityException("Invalid encrypted payload");
+        }
+
+        byte[] iv = new byte[GCM_IV_LENGTH_BYTES];
+        byte[] ciphertextWithTag = new byte[in.length - GCM_IV_LENGTH_BYTES];
+
+        System.arraycopy(in, 0, iv, 0, GCM_IV_LENGTH_BYTES);
+        System.arraycopy(in, GCM_IV_LENGTH_BYTES, ciphertextWithTag, 0, ciphertextWithTag.length);
+
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv));
+
+        byte[] plaintext = cipher.doFinal(ciphertextWithTag);
+        return new String(plaintext, StandardCharsets.UTF_8);
+    }
 }
