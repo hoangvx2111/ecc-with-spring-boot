@@ -1,4 +1,4 @@
-package com.example.ecc.wallet;
+package com.example.ecc.model;
 
 import java.security.PublicKey;
 import java.security.PrivateKey;
@@ -7,7 +7,7 @@ public class WalletInfo {
     private final String address;
     private final PublicKey publicKey;
     private final PrivateKey privateKey;
-    private long balance; // nếu có quản lý số dư
+    private long balance;
 
     public WalletInfo(String address, PublicKey publicKey, PrivateKey privateKey, long balance) {
         this.address = address;

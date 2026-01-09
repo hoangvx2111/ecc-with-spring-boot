@@ -1,5 +1,6 @@
-package com.example.ecc.wallet;
+package com.example.ecc.controller;
 
+import com.example.ecc.model.WalletInfo;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.springframework.web.bind.annotation.*;
 import javax.annotation.PostConstruct;
